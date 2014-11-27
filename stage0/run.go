@@ -30,6 +30,7 @@ import (
 	"github.com/coreos/rocket/app-container/schema/types"
 	"github.com/coreos/rocket/cas"
 	rktpath "github.com/coreos/rocket/path"
+	"github.com/coreos/rocket/pkg/lock"
 	ptar "github.com/coreos/rocket/pkg/tar"
 	"github.com/coreos/rocket/version"
 
@@ -73,6 +74,15 @@ func Setup(cfg Config) (string, error) {
 
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", fmt.Errorf("error creating directory: %v", err)
+	}
+
+	// Set up the container lock
+	l, err := lock.NewLock(dir)
+	if err == nil {
+		err = l.ExclusiveLock()
+	}
+	if err != nil {
+		return "", fmt.Errorf("error locking directory: %v", err)
 	}
 
 	log.Printf("Unpacking stage1 rootfs")
