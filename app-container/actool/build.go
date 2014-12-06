@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/coreos/rocket/app-container/aci"
 	"github.com/coreos/rocket/app-container/schema"
@@ -68,9 +69,18 @@ func buildWalker(root string, aw aci.ArchiveWriter, rootfs bool) filepath.WalkFu
 			}
 			defer file.Close()
 		case os.ModeSymlink:
+			// relative symlink for tar header
 			target, err := os.Readlink(path)
 			if err != nil {
 				return err
+			}
+			// check absolute destination is within directory
+			p, err := filepath.EvalSymlinks(path)
+			if err != nil {
+				return err
+			}
+			if !strings.HasPrefix(p, root) {
+				return fmt.Errorf("file %v links outside rootfs", path)
 			}
 			link = target
 		}
