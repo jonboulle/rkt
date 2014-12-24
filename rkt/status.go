@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	"github.com/appc/spec/schema/types"
 	"github.com/coreos/rocket/pkg/lock"
@@ -30,50 +31,50 @@ func init() {
 }
 
 func runStatus(args []string) (exit int) {
-	isGarbage := false
-
 	if flagContainerUUID.Empty() {
 		fmt.Fprintf(os.Stderr, "--uuid required\n")
 		return 1
 	}
+	id := flagContainerUUID.String()
 
-	cp := filepath.Join(containersDir(), flagContainerUUID.String())
-	l, err := lock.NewLock(cp)
-	if err != nil {
-		cp = filepath.Join(garbageDir(), flagContainerUUID.String())
-		l, err = lock.NewLock(cp)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Unable to open lock for container %q: %v\n", flagContainerUUID.String(), err)
-			return 2
+	isGarbage := false
+	exited := true
+
+	cp := filepath.Join(containersDir(), id)
+	var l lock.DirLock
+	var err error
+	// First check if an active container exists
+	if flagWait {
+		// If necessary, block until the lock can be obtained
+		l, err = lock.SharedLock(cp)
+	} else {
+		l, err = lock.TrySharedLock(cp)
+		if isNoSuchDirErr(err) {
+			// Fall back to checking garbage directory
+			cp = filepath.Join(garbageDir(), id)
+			l, err = lock.TrySharedLock(cp)
+			isGarbage = true
 		}
-		isGarbage = true
+	}
+	switch {
+	case err == lock.ErrLocked:
+		if isGarbage {
+			fmt.Fprintf(os.Stderr, "Container locked by another process\n")
+			return 1
+		}
+		exited = false
+	case isNoSuchDirErr(err):
+		fmt.Fprintf(os.Stderr, "No such container: %s\n", id)
+		return 1
+	case err != nil:
+		fmt.Fprintf(os.Stderr, "Error locking container: %v\n", err)
+		return 1
 	}
 	defer l.Close()
 
-	exited := true
-	if flagWait && !isGarbage {
-		err = l.SharedLock()
-	} else {
-		err = l.TrySharedLock()
-		if err == lock.ErrLocked {
-			if isGarbage {
-				// container is exited and being deleted, we can't reliably query its status, it's effectively gone.
-				fmt.Fprintf(os.Stderr, "Unable to query status: %q is being removed\n", flagContainerUUID.String())
-				return 3
-			}
-			exited = false
-			err = nil
-		}
-	}
-
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Lock error: %v\n", err)
-		return 4
-	}
-
 	if err := printStatus(cp, exited); err != nil {
 		fmt.Fprintf(os.Stderr, "Unable to print status: %v\n", err)
-		return 5
+		return 1
 	}
 
 	return 0
@@ -91,7 +92,7 @@ func printStatus(cpath string, exited bool) error {
 		return err
 	}
 
-	fmt.Printf("pid=%d\nexited=%v\n", pid, exited)
+	fmt.Printf("pid=%d\nexited=%t\n", pid, exited)
 	for app, stat := range stats {
 		fmt.Printf("%s=%d\n", app, stat)
 	}
@@ -141,4 +142,9 @@ func getIntFromFile(path string) (i int, err error) {
 	}
 
 	return
+}
+
+func isNoSuchDirErr(err error) bool {
+	e, ok := err.(syscall.Errno)
+	return ok && e == syscall.ENOENT
 }
