@@ -49,12 +49,12 @@ func runStatus(args []string) (exit int) {
 		l, err = lock.SharedLock(cp)
 	} else {
 		l, err = lock.TrySharedLock(cp)
-		if isNoSuchDirErr(err) {
-			// Fall back to checking garbage directory
-			cp = filepath.Join(garbageDir(), id)
-			l, err = lock.TrySharedLock(cp)
-			isGarbage = true
-		}
+	}
+	if isNoSuchDirErr(err) {
+		// Fall back to checking garbage directory
+		cp = filepath.Join(garbageDir(), id)
+		l, err = lock.TrySharedLock(cp)
+		isGarbage = true
 	}
 	switch {
 	case err == lock.ErrLocked:
@@ -69,8 +69,9 @@ func runStatus(args []string) (exit int) {
 	case err != nil:
 		fmt.Fprintf(os.Stderr, "Error locking container: %v\n", err)
 		return 1
+	default:
+		defer l.Close()
 	}
-	defer l.Close()
 
 	if err := printStatus(cp, exited); err != nil {
 		fmt.Fprintf(os.Stderr, "Unable to print status: %v\n", err)
