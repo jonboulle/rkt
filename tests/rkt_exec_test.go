@@ -17,8 +17,10 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
+	"github.com/coreos/rkt/Godeps/_workspace/src/github.com/appc/spec/schema/types"
 	"github.com/coreos/rkt/Godeps/_workspace/src/github.com/steveeJ/gexpect"
 )
 
@@ -53,25 +55,61 @@ func TestRunPreparedExec(t *testing.T) {
 	ctx := newRktRunCtx()
 	defer ctx.cleanup()
 
-	var rktCmd, uuid, expected string
+	var rktCmd, expected string
 
 	// Sanity check - make sure no --exec override prints the expected exec invocation
 	rktCmd = fmt.Sprintf("%s prepare --insecure-skip-verify %s -- --print-exec", ctx.cmd(), execImage)
-	uuid = runRktAndGetLastLine(t, rktCmd)
+	child, err := gexpect.Spawn(rktCmd)
+	if err != nil {
+		t.Fatalf("Cannot exec rkt: %v", err)
+	}
+	// Read out the UUID.
+	result, out, err := expectRegexWithOutput(child, "\n[0-9a-f-]{36}")
+	if err != nil || len(result) != 1 {
+		t.Fatalf("Error: %v\nOutput: %v", err, out)
+	}
 
-	t.Logf("Prepared rkt container has uuid: %s", uuid)
+	err = child.Wait()
+	if err != nil {
+		t.Fatalf("rkt didn't terminate correctly: %v", err)
+	}
+	podIDStr := strings.TrimSpace(result[0])
+	podID, err := types.NewUUID(podIDStr)
+	if err != nil {
+		t.Fatalf("%q is not a valid UUID: %v", podIDStr, err)
+	}
 
-	rktCmd = fmt.Sprintf("%s run-prepared %s", ctx.cmd(), uuid)
+	t.Logf("Prepared rkt container has uuid: %s", podID)
+
+	rktCmd = fmt.Sprintf("%s run-prepared --mds-register=false %s", ctx.cmd(), podID)
 	expected = "inspect execed as: /inspect"
 	runRktAndChkOutput(t, rktCmd, expected)
 
 	// Now test overriding the entrypoint (which is a symlink to /inspect so should behave identically)
 	rktCmd = fmt.Sprintf("%s prepare --insecure-skip-verify %s --exec /inspect-link -- --print-exec", ctx.cmd(), execImage)
-	uuid = runRktAndGetLastLine(t, rktCmd)
+	child, err = gexpect.Spawn(rktCmd)
+	if err != nil {
+		t.Fatalf("Cannot exec rkt: %v", err)
+	}
+	// Read out the UUID.
+	result, out, err = expectRegexWithOutput(child, "\n[0-9a-f-]{36}")
+	if err != nil || len(result) != 1 {
+		t.Fatalf("Error: %v\nOutput: %v", err, out)
+	}
 
-	t.Logf("Prepared rkt container has uuid: %s", uuid)
+	err = child.Wait()
+	if err != nil {
+		t.Fatalf("rkt didn't terminate correctly: %v", err)
+	}
+	podIDStr = strings.TrimSpace(result[0])
+	podID, err = types.NewUUID(podIDStr)
+	if err != nil {
+		t.Fatalf("%q is not a valid UUID: %v", podIDStr, err)
+	}
 
-	rktCmd = fmt.Sprintf("%s run-prepared --mds-register=false %s", ctx.cmd(), uuid)
+	t.Logf("Prepared rkt container has uuid: %s", podID)
+
+	rktCmd = fmt.Sprintf("%s run-prepared --mds-register=false %s", ctx.cmd(), podID)
 	expected = "inspect execed as: /inspect-link"
 	runRktAndChkOutput(t, rktCmd, expected)
 }
@@ -90,28 +128,4 @@ func runRktAndChkOutput(t *testing.T, rktCmd, expectedLine string) {
 	if err = child.Wait(); err != nil {
 		t.Fatalf("rkt didn't terminate correctly: %v", err)
 	}
-}
-
-func runRktAndGetLastLine(t *testing.T, rktCmd string) string {
-	t.Logf("rkt: %s", rktCmd)
-	child, err := gexpect.Spawn(rktCmd)
-	if err != nil {
-		t.Fatalf("cannot exec rkt: %v", err)
-	}
-
-	// To get the last line, keep reading lines until an error is returned
-	var l, line string
-	for {
-		l, err = child.ReadLine()
-		if err == nil {
-			line = l
-		} else {
-			break
-		}
-	}
-
-	if err = child.Wait(); err != nil {
-		t.Fatalf("rkt didn't terminate correctly (got \"%s\"): %v", line, err)
-	}
-	return line
 }
