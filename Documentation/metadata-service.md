@@ -1,0 +1,1 @@
+subcommands/metadata-service.md
