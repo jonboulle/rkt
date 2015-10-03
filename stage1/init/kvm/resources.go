@@ -15,54 +15,57 @@
 package kvm
 
 import (
+	"fmt"
 	"runtime"
 
 	"github.com/coreos/rkt/Godeps/_workspace/src/github.com/appc/spec/schema"
 	"github.com/coreos/rkt/Godeps/_workspace/src/github.com/appc/spec/schema/types"
 )
 
+const (
+	defaultMem        = 128 // MB
+	systemMemOverhead = 128 // MB
+)
+
 // findResources finds value of last isolator for particular type.
 func findResources(isolators types.Isolators) (mem, cpus int64) {
-	mem = 128
+	fmt.Printf("%#v\n", isolators)
+	mem = defaultMem
 	for _, i := range isolators {
 		switch v := i.Value().(type) {
 		case *types.ResourceMemory:
-			memQuantity := v.Limit()
-			mem = memQuantity.Value()
+			mem = v.Limit().Value()
 			// Convert bytes into megabytes
 			mem /= 1024 * 1024
 		case *types.ResourceCPU:
-			cpusQuantity := v.Limit()
-			cpus = cpusQuantity.Value()
+			cpus = v.Limit().Value()
 		}
 	}
-
 	return mem, cpus
 }
 
-// GetAppsResources returns values specfied by user in pod-manifest.
-// Function expects a podmanifest apps.
-// Return aggregate quantity of mem (in MB) and cpus.
+// GetAppsResources returns the values for apps' resource limits specified in
+// an AppList (from a PodManifest). It returns the aggregate quantity of memory
+// (in MB) and CPUs. If resource limits are not found in the AppList, default values
+// are used.
 func GetAppsResources(apps schema.AppList) (totalCpus, totalMem int64) {
 	cpusSpecified := true
-	var flag bool
 	for i := range apps {
 		ra := &apps[i]
 		app := ra.App
 		mem, cpus := findResources(app.Isolators)
-		flag = cpus != 0
-		cpusSpecified = cpusSpecified && flag
+		cpusSpecified = cpusSpecified && cpus != 0
 		totalCpus += cpus
 		totalMem += mem
 	}
-	// If user doesn't specify cpus for at least one app, we set no limit for
-	// whole pod.
+	// If user doesn't specify CPUs for any app, we set no limit for whole
+	// pod.
 	if !cpusSpecified {
 		totalCpus = int64(runtime.NumCPU())
 	}
 
-	// Increase amount of memory by 128MB for system.
-	totalMem += 128
+	// Add an overhead for the VM system
+	totalMem += systemMemOverhead
 
 	return totalCpus, totalMem
 }
