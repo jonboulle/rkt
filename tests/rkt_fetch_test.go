@@ -161,7 +161,7 @@ func testFetchDefault(t *testing.T, arg string, image string, imageArgs string, 
 	if err := expectWithOutput(child, remoteFetchMsg); err != nil {
 		t.Fatalf("%q should be found: %v", remoteFetchMsg, err)
 	}
-	child.Wait()
+	waitOrFail(t, child, 0)
 
 	// 2. Run cmd with the image available in the store, should get $storeMsg.
 	runRktAndCheckRegexOutput(t, cmd, storeMsg)
